@@ -1,0 +1,1440 @@
+---
+title: "movies"
+author: "luca & rosa & simal & faiz"
+date: "2024-02-12"
+output:
+  word_document: default
+  html_document: default
+  pdf_document: default
+always_allow_html: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+CASE STUDY
+
+The movie industry is one of the most lucrative in our times, with thousands of movies produced every year, attracting people of all ages to cinemas. This leads us to ask a series of questions: How does this industry work? why do some movies make a lot of money while Others struggle for success? What variables influence the gross? Our goal is try to understand all the factors that can influence earnings.
+
+```{r}
+movies_df <- read.csv("C:/Users/hp/OneDrive/Desktop/Data Science Unina/SL&DA/movies.csv")
+library(tidyverse)
+```
+
+```{r}
+str(movies_df)
+```
+
+Before analysing missing value, replace all the blanket space with NA
+```{r}
+# Loop through each column of the dataset
+for (col in names(movies_df)) {
+  # Replace blank spaces with NA for the current column
+  movies_df[[col]][movies_df[[col]] == ""] <- NA
+  }
+```
+
+```{r}
+missing_values_df <- colSums(is.na(movies_df))
+missing_values_df
+```
+We are going to deal with these missing value in this way:
+- Variables with less then 5 missing value --> replace them manually
+- Variables with more then 5 missing value --> deal with them in a different way.
+
+But, before doing that, looking at dataset we immediatly noticed that there are a lot of country involved in the analysis. Here they are:
+
+```{r}
+unique(movies_df$country)
+```
+
+By the way, it looks like that more then the half of observation come from USA and UK. We are going to look at percentage covered from the top 5 country and decide how to continue with our analysis:
+
+```{r}
+country_counts <- movies_df %>%
+  group_by(country) %>%
+  summarise(Count = n()) %>%
+  arrange(desc(Count))
+
+# Identify the top two levels
+top_five_countries <- country_counts[1:5,]
+
+# Calculate the percentage of total observations
+top_five_countries <- mutate(top_five_countries,
+                            Percentage = (Count / sum(country_counts$Count)) * 100)
+
+# Print the results
+print(top_five_countries)
+```
+
+As we can see, the top 5 countries cover almost 90% of movies of which USA and UK covers more then 80% of movies, while in 3rd position we have France with less then 4%. We don't have enough observation and information about country different from UK and USA. We retain that a possible model fit on 80% of observation of 2 country would not fit well also for the others. That's why we decide to restrict our analysis to USA and UK.
+
+```{r}
+# Filter the dataset to keep only observations from the USA and UK
+movies <- movies_df %>%
+  filter(country %in% c("United States", "United Kingdom"))
+unique(movies$country)
+```
+
+After having a first filtering of the dataset, we can start our analysis with missing value
+
+
+# Deal with MISSING VALUES
+
+```{r}
+missing_values <- colSums(is.na(movies))
+missing_values
+```
+
+We replace the variables with less then 5 NA (score, votes, writer, runtime) with their real value searching on internet these information:
+```{r}
+missing_score <- movies[is.na(movies$score), ]
+
+# Display the observations with missing values
+print(missing_score)
+```
+
+
+#MISSING SCORE AND VOTES
+About "The Robinsons", we don't even find information on internet, so we decided to remove it.
+```{r}
+# Replace missing score
+
+movies$score[movies$name == "Love by Drowning"] <- 7.2
+movies$score[movies$name == "It's Just Us"] <- 8.4
+
+# Replace votes
+
+movies$votes[movies$name == "Love by Drowning"] <- 13
+movies$votes[movies$name == "It's Just Us"] <- 9
+movies <- movies[movies$name != "The Robinsons", ]
+```
+
+
+#MISSING WRITER
+```{r}
+missing_writer <- movies[is.na(movies$writer), ]
+```
+
+```{r}
+movies$writer[movies$name == "The Garden"] <- "Dereck Jarman"
+movies$writer[movies$name == "The Trip"] <- "Steve Coogan"
+```
+
+#MISSING RUNTIME
+```{r}
+missing_runtime <- movies[is.na(movies$runtime), ]
+```
+
+```{r}
+movies$runtime[movies$name == "One for the Money"] <- 91
+movies$runtime[movies$name == "Saving Mbango"] <- 110
+```
+
+
+Now, regarding the others variables, we start looking if there are rows in which rating, budget, gross and company lack simultaneously. For that operation, we find that rows first of all.
+```{r}
+# Create an index of rows with all 4 variables missing simultaneously
+rows_to_remove <- with(movies, is.na(rating) & is.na(budget) & 
+                               is.na(gross) & is.na(company))
+NA_value = 0
+for (value in rows_to_remove) {
+  if (value) {
+    num <- num + 1  # Increment num by 1 if the value is TRUE
+  }
+}
+print(NA_value)
+```
+
+and we can see 0 observation miss all value simultaneously.
+
+
+# RATING variables
+
+```{r}
+unique(movies$rating)
+```
+
+Here the explication of this modalities:
+R: Restricted – Under 17 requires accompanying parent or adult guardian
+PG: Parental guidance suggested
+PG-13: Parents strongly cautioned, some material may be inappropriate for < 13
+G: General audiences – All ages admitted.
+X: No one under 17 admitted
+NC-17: Adults Only – No one 17 and under admitted
+
+After a first analysis, we found on internet that the system and the ratings are the responsibility of the Motion Picture Association (MPA). The main categories are the following:
+1. G
+2. PG
+3. PG-13
+4. R
+5. NC-17
+
+And we found other important information:
+- A film has not been submitted for a rating can present "Unrated" or "Not rated";
+- Other media, such as television programs, music and video games, are rated by other entities such as the TV-PG, TV-MA ecc;
+- X has been replaced by NC-17;
+- Films can be exhibited without a rating but most theaters refuse to exhibit non-rated or NC-17;
+
+Plotting this data we can confirm all this information
+
+```{r}
+library(ggplot2)
+
+# Create bar plot using ggplot2 with total counts for each category
+ggplot(movies, aes(x = rating)) +
+  geom_bar(fill = "blue") +
+  labs(title = "Title Status", x = "Status", y = "Frequency") +
+  geom_text(stat = "count", aes(label = after_stat(count)), vjust = -0.5, size = 3)+
+  scale_y_continuous(labels = scales::comma) +    # without this y label was 3e+05 
+  theme_minimal()
+```
+
+And, if we calculate the cumulative frequency of the categories envisaged by the MPA, we obtain approximately 95%. First, we substitute missing value with "Unrated":
+
+```{r}
+# Replace NA values with 'Unrated'
+movies$rating <- replace(movies$rating, is.na(movies$rating), "Unrated")
+
+# Create the table of counts for each rating modality
+rating_counts <- table(movies$rating)
+MPA_modalities <- c("G", "PG", "PG-13", "R", "NC-17")
+
+# Filter the rating_counts table for the selected modalities
+selected_counts <- rating_counts[MPA_modalities]
+
+# Calculate the sum of counts for the selected modalities
+sum_MPA_modalities <- sum(selected_counts)
+
+# Calculate the frequency for the selected modalities
+frequency_of_selected_modalities <- sum_MPA_modalities / sum(rating_counts)
+
+# Print the frequency
+print(frequency_of_selected_modalities)
+```
+
+all the other categories can be considered as subcategories of the other 5. That's why we proceed to aggregate them togheter with the similar one:
+```{r}
+movies$rating <- ifelse(movies$rating == "TV-PG", "PG", movies$rating)
+movies$rating <- ifelse(movies$rating == "X", "NC-17", movies$rating)
+movies$rating <- ifelse(movies$rating == "Unrated", "Not Rated", movies$rating)
+movies$rating <- ifelse(movies$rating == "TV-MA", "NC-17", movies$rating)
+movies$rating <- ifelse(movies$rating == "TV-14", "NC-17", movies$rating)
+movies$rating <- ifelse(movies$rating == "Approved", "G", movies$rating)
+```
+
+These information and change have been done according to the following source:
+https://en.wikipedia.org/wiki/Motion_Picture_Association_film_rating_system
+https://en.wikipedia.org/wiki/TV_Parental_Guidelines#TV-PG
+
+# PLOT RATING
+```{r}
+ggplot(movies, aes(x = rating)) +
+  geom_bar(fill = "blue") +
+  labs(title = "Title Status", x = "Status", y = "Frequency") +
+  geom_text(stat = "count", aes(label = after_stat(count)), vjust = -0.5, size = 3)+
+  scale_y_continuous(labels = scales::comma) +    # without this y label was 3e+05 
+  theme_minimal()
+```
+
+# GENRE COLUMN
+
+```{r}
+genre_count <- movies %>%
+  count(genre) %>%
+  arrange(desc(n))  # Sort genres by frequency
+
+# Calculate percentages
+genre_count <- genre_count %>%
+  mutate(percentage = n / sum(n) * 100)
+
+# Reorder the genre variable by frequency
+genre_count <- genre_count %>%
+  mutate(genre = factor(genre, levels = genre_count$genre))
+
+# Bar plot
+ggplot(genre_count, aes(x = genre, y = n)) +
+  geom_bar(stat = "identity", fill = "blue") +  # Use a single color for all bars
+  geom_text(aes(label = paste0(round(percentage, 2), "%")), vjust = -0.5, size = 3) +  # Add percentages as labels
+  theme_minimal() +
+  labs(title = "Distribution of Movie Genres", x = "Genre", y = "Count") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))  # Rotate x-axis labels if necessary
+```
+
+As we can see, there are many genres that account for less then 1% of obs. We won't consider them in our analysis, making the analysis easier to perform thanks to less modalities that would have no impact on the model.
+
+```{r}
+# Filter the dataset to keep only observations from the USA and UK
+movies <- movies %>%
+  filter(genre %in% c("Comedy", "Action", "Drama", "Crime", "Biography", "Adventure", "Horror", "Animation"))
+
+unique(movies$genre)
+```
+
+
+Now, because we have many missing value in the Budget column, we replace these missing value with the median value based on the genre they belong to. 
+
+```{r}
+medians_budget_by_genre <- tapply(movies$budget, movies$genre, median, na.rm = TRUE)
+
+movies$budget[is.na(movies$budget)] <- medians_budget_by_genre[movies$genre[is.na(movies$budget)]]
+
+```
+
+
+and the same we do with gross, which also have few NA values:
+
+```{r}
+medians_gross_by_genre <- tapply(movies$gross, movies$genre, median, na.rm = TRUE)
+
+movies$gross[is.na(movies$gross)] <- medians_gross_by_genre[movies$genre[is.na(movies$gross)]]
+```
+
+
+and company, but this time we use the mode to look for the company that did more movies:
+```{r}
+
+mode_by_genre <- tapply(movies$company, movies$genre, mode)
+
+movies$company[is.na(movies$company)] <- mode_by_genre[movies$genre[is.na(movies$company)]]
+
+```
+
+
+```{r}
+missing_values <- colSums(is.na(movies))
+missing_values
+```
+
+## SOME VISUALIZATION
+
+Now that we cleaned enough the dataset, we can start with some visualization.
+
+# NUMERICAL VARIABLES
+
+```{r}
+numeric_columns <- sapply(movies, is.numeric)
+numeric_df <- movies[, numeric_columns]
+
+for(column_name in names(numeric_df)) {
+  print(ggplot(numeric_df, aes_string(x = column_name)) +
+          geom_histogram(aes(y = ..density..), binwidth = diff(range(numeric_df[[column_name]]))/30) +
+          geom_density(alpha = 0.3, fill = "#FF8666") +
+          labs(title = paste("Distribution of", column_name), x = column_name, y = "Density"))
+}
+
+```
+
+# DISTRIBUTION OF YEAR
+As we can see most of the movies were produced in the 1990s. There is, then, a gradual decrease in density in the 2000s followed by a slight increase until 2020, where we have a decline. 
+
+# DISTRIBUTION OF SCORE 
+
+The graph shows a peak in the distribution of movie review scores between 6 and 8. This suggests that a large proportion of movies tend to receive scores within this range.
+
+# DISTRIBUTION OF VOTES 
+
+As we can see the majority of movies fall in a range of 0 to 500000. 
+
+# DISTRIBUTION OF BUDGET
+As the graph shows, the peak in the distribution of movie budgets between 0 and 100 million, this suggests that a large proportion of movies fall within this budget range. 
+
+# DISTRIBUTION OF GROSS
+As the graph shows there is a peak in distribution around the 50-100 million range, indicating a large proportion of movies fall in this range. Then, we can see a decline, indicating that movies with extremely high gross revenue are less frequent. 
+
+
+# DISTRIBUTION OF RUNTIME 
+The graph shows a peak around the 90-120 minute mark, this indicates that a large proportion of movies have runtimes within this range, then we can see a decrease, this suggests that there are fewer movies with very long runtimes. 
+
+
+# SOME CORRELATION
+
+Let's start with some pairwise scatterplots
+
+```{r}
+numerical_vars <- sapply(movies, is.numeric)
+
+# Create a subset containing only numerical variables
+numerical_data <- movies[, numerical_vars]
+
+pairs(numerical_data,
+            main = "Pairwise scatterplot",
+            col = "red",
+            pch = 20)
+```
+
+
+and we can also analyse them with a correlation matrix:
+
+```{r}
+library(GGally)
+ggpairs(numerical_data, use = "complete.obs") 
+```
+
+As we can see from this matrix, it appears that:
+1) Gross and Budget have the highest correlation;
+2) Also Gross and Votes have an higher correlation, so the highest the votes, the highest the gross. That's something that we would expect because more votes = greater hype
+
+Then, smaller but relevant correlation could be:
+votes-score;
+budget-votes;
+score-runtime
+
+
+
+# TOP Directors, Stars and writers
+
+Now, we show some visualization about directors, stars and writers, sorted for popularity 
+
+```{r}
+# Top Directors
+top_directors <- movies %>% 
+                 count(director, sort = TRUE) %>%  # Summarize counts and sort
+                 top_n(10) # Keep the top 10 results
+
+# Top Writers
+top_writers <- movies %>%
+               count(writer, sort = TRUE) %>%
+               top_n(10)
+
+# Top Stars
+top_stars <- movies %>%
+             count(star, sort = TRUE) %>%
+             top_n(10)
+```
+
+
+#Plot for Top Directors
+```{r}
+# Plotting 
+ggplot(top_directors, aes(x = reorder(director, n), y = n)) +
+  geom_col(fill = "blue") +  # Set all bars to the same color
+  coord_flip() + 
+  labs(title = "Top 10 Directors by Movie Count", x = "Director", y = "Count") +
+  theme_minimal() +
+  theme(legend.position = "none")  # Remove legend
+```
+The chart shows the directors who made more movies. 
+
+#Plot for Top Writers
+```{r}
+ggplot(top_writers, aes(x = reorder(writer, n), y = n)) +
+  geom_col(fill = "blue") +  # Set all bars to the same color
+  coord_flip() + 
+  labs(title = "Top 10 Writers by Movie Count", x = "Writer", y = "Count") +
+  theme_minimal() +
+  theme(legend.position = "none")  # Remove legend
+```
+
+The chart shows the writers who made more movies.
+
+#Plot for Top Stars
+```{r}
+ggplot(top_stars, aes(x = reorder(star, n), y = n)) +
+  geom_col(fill = "blue") +  # Set all bars to the same color
+  coord_flip() + 
+  labs(title = "Top 10 Stars by Movie Count", x = "Star", y = "Count") +
+  theme_minimal() +
+  theme(legend.position = "none")  # Remove legend
+
+```
+
+The chart shows the actors who played in more movies. 
+
+
+
+## Budget and gross 
+
+We are going now to show some plots about budget and gross. To do this we scale both variables with log function, if not it would be impossible to visualize correctly boxplots because of some important outliers.
+
+
+# Gross per Month
+
+We can show the distribution of gross for each month by first extracting the month information from the 'released' column and create a separate month column which may be useful for our further analysis.
+
+```{r}
+library(stringr)
+
+#Convert the whole column to string
+movies$released <- as.character(movies$released)
+
+#Extract the word before the first space
+movies$month <- str_extract(movies$released, pattern = "^\\S+") 
+
+```
+
+
+If we look at the month column that we extracted from 'released', there are 6 rows in which instead of the month itself, the year was printed. We can change them manually.
+```{r}
+movies$month[movies$name == "Longshot"] <- "June"
+movies$month[movies$name == "Five Days One Summer"] <- "July"
+movies$month[movies$name == "O.C. and Stiggs"] <- "July"
+movies$month[movies$name == "The Garden"] <- "January"
+movies$month[movies$name == "Dahmer"] <- "June"
+movies$month[movies$name == "Romeo and Juliet"] <- "February"
+```
+
+
+
+
+```{r}
+# average gross revenue by month
+gross_month <- aggregate(gross ~ month, data = movies, FUN = mean)
+
+months <- factor(c("January", "February", "March", "April", "May", "June", 
+                   "July", "August", "September", "October", "November", "December"),
+                 levels = c("January", "February", "March", "April", "May", "June", 
+                            "July", "August", "September", "October", "November", "December"))
+ 
+# Create a bar plot
+ggplot(gross_month, aes(x = months, y = gross)) +
+  geom_bar(stat = "identity", fill = "blue") +
+  labs(title = "Average Gross Revenue by Release Month",
+       x = "Release Month",
+       y = "Average Gross Revenue")
+```
+The chart shows the gross distribution across all the release months: as we can see for the first months of the year have been registered really lower gross, this due to two major film awards, the Golden Globe (on January) and the Oscars (on February). Another event that has a negative impact is the Super Bowl, which depresses spending on movies.
+From May, instead, there is an increase with a peak on June, thanks to the end of the school, which leads younger people to go the cinema more. On August and September has been recorded a decrease, due to family vacations and the start of school, because younger moviegoers are preoccupied with starting the school year and so they don't go to movies on weeknights anymore. This downfall is followed by a rise on November and December, thanks to the Chirstmas holiday.
+
+Source on web: https://en.wikipedia.org/wiki/Dump_months
+
+also with a boxplot that will be usefull for other analisys
+```{r}
+# Convert 'month' to an ordered factor
+months <- c("January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December")
+movies$month <- factor(movies$month, levels = months)
+
+# Create the boxplot with ordered months
+ggplot(movies, aes(x = month, y = log(gross), fill = month)) +
+  geom_boxplot() +
+  labs(title = "Distribution of Gross by Release Month",
+       x = "Release Month",
+       y = "Gross Revenue",
+       fill = "Release Month") +
+  theme_minimal() 
+```
+As we can see from the boxplot, movies released in June and July have higher median gross compared to other months. However, the median of gross across all months appears relatively consistent. 
+
+# Budget distribution by Rating
+```{r}
+ggplot(movies, aes(x = rating, y = log(budget), fill = rating)) +
+  geom_boxplot() +
+  labs(title = "Budget Distribution by Rating")
+```
+ 
+As the boxplot shows, the median representative of budget for G and PG-13 movies appears to be higher compared to other ratings.The boxplot also shows there are different outliers especially for R  and Not Rated  movies.
+
+
+
+# Gross Distribution by Rating
+
+```{r}
+ggplot(movies, aes(x = rating, y = log(gross), fill = rating)) + 
+  geom_boxplot() +
+  labs(title = "Gross Distribution by Rating", y = "Gross") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+As the boxplot shows, the gross is quite the same for all the rating, except for the NC-17 and Not rated movies since have been registered lower values.
+
+# Gross Distribution by Genre
+
+```{r}
+library(ggplot2)
+
+# Create the boxplot
+ggplot(data = movies, aes(x = genre, y = log(gross), fill = genre)) +
+  geom_boxplot() +
+  labs(title = "Gross Distribution by Genres", x = "Genre", y = "Gross") +
+  theme_minimal() 
+```
+The boxplot shows the median of gross across all the movies genres, we can see the boxes are quite the same, except for animation and action where have been recorded a higher median values. However, it is crucial to highlight the presence of numerous outliers, especially for comedy and action movies. 
+
+# Budget Distribution by Genre
+
+```{r}
+ggplot(data = movies, aes(x = genre, y = log(budget), fill = genre)) +
+  geom_boxplot() +
+  labs(title = "Budget Distribution by Genres", x = "Genre", y = "Budget") +
+  theme_minimal()
+```
+
+The boxplot shows the budget distribution across all movies genres, as we can see there isn't a big difference between the median of comedy, crime, drama, biography and adventure, even if we have to highlight the amount of outliers especially for comedy and drama. Based on the median, the genres that have higher gross are action and animation.   
+
+
+# Budget distribution by Country
+```{r}
+# Filter for only the countries of interest, e.g., USA and Canada
+movies <- movies %>% 
+  filter(country %in% c("United States", "United Kingdom"))
+
+ggplot(movies, aes(x = country, y = log(budget), fill = country)) +
+  geom_boxplot() +
+  labs(title = "Budget Distribution by Country",
+       x = "Country",
+       y = "Gross") +
+  scale_fill_brewer(palette = "Set1") +
+  theme_minimal()
+```
+As we can see, the budget is higher for movies produced in USA. 
+
+# Gross distribution by Country
+```{r}
+# Filter for only the countries of interest, e.g., USA and Canada
+movies <- movies %>% 
+  filter(country %in% c("United States", "United Kingdom"))
+
+ggplot(movies, aes(x = country, y = log(gross), fill = country)) +
+  geom_boxplot() +
+  labs(title = "Gross Distribution by Country",
+       x = "Country",
+       y = "Gross") +
+  scale_fill_brewer(palette = "Set1") +
+  theme_minimal()
+```
+
+As we can see, gross is higher for movies produced in USA.
+
+## CATEGORICAL VARIABLES 
+
+We analyse now some relationship between categorical variables that could be useful in future.
+
+## CrossTable COUNTRY-RATING
+```{r}
+library(descr)
+table_movies_rating <- table(movies$country, movies$rating)
+table_movies_rating
+```
+As we can see the rating distribution is the same for the movies produced in UK and USA. In both countries, the majority of movies has a "R" rating, followed by "PG-13" and "PG". 
+
+
+```{r}
+library(dplyr)
+avg_gross <- mean(movies$gross)
+
+#Gross filtered by Company
+gross_via_company <- movies %>%
+                     group_by(company) %>%
+                     summarize(avg_gross = mean(gross, na.rm = TRUE))                       
+
+
+# Sorting and Filtering
+gross_via_company <- gross_via_company %>%
+                        arrange(desc(avg_gross)) %>% 
+head(10) 
+```
+
+```{r}
+library(plotly)
+
+fig <- plot_ly(gross_via_company,
+               x = ~avg_gross,
+               y = ~company,
+               type = 'bar',
+               orientation = 'h',
+               color = ~avg_gross,
+               color_continuous_scale = c('#A084E8', '#00FFAB', '#00FFAB')
+              ) %>%
+plotly::layout(title = "Top 10 Companies By Average Gross Revenue",
+                 xaxis = list(title = "Average Gross Revenue"),
+                 yaxis = list(title = "Movie Company"),
+                 hovermode = "y unified",
+                 annotations = list(x = gross_via_company$avg_gross,
+                                    y = gross_via_company$company,
+                                    text = sapply(gross_via_company$avg_gross, function(x) {
+                                      if (x >= 1e9) {
+                                        paste0(format(round(x / 1e9, 1), nsmall = 1), "B")
+                                      } else if (x >= 1e6) {
+                                        paste0(format(round(x / 1e6, 1), nsmall = 1), "M")
+                                      } else {
+                                        format(x, big.mark = ",", scientific = FALSE)
+                                      }
+                                    }),
+                                   xref = 'x',
+                                    yref = 'y',
+                                   showarrow = FALSE,
+                                    font = list(family = "tahoma", size = 13),
+                                    hovertemplate = "Movie Company: %{y}<br>Average Gross Revenue: %{text}"))
+fig
+```
+
+The bar chart shows the top 10 companies based on the gross. 
+
+
+# Chapter 2: CONFERMATIVE DATA ANALYSIS
+
+This chapter contains all hypotheses tests about assumption made during the first part of the project.
+
+# Score
+# Normality Test
+
+We check here the normality of Score variables. As we saw during the EDA, it looked like this assumption was not verified. Let's look at QQplot:
+
+#SCORE NORMALITY TEST
+```{r}
+library(ggpubr)
+ggqqplot(movies$score, ylab = "Score")
+```
+
+And, as we can see, score doesn't follow a normal distribution, We can't perform Shapiro test because we have more then 5 thousand observation, but we are confident about it thank to the graph.
+
+#RUNTIME NORMALITY TEST
+
+```{r}
+ggqqplot(movies$runtime, ylab = "Runtime")
+```
+
+Also here we are quite confident to reject the hypotheses of normality.
+
+
+# KRUSKAL TEST GROSS-RATING
+
+Ho: The distribution of gross by rating is uniform 
+H1: The distribution of gross by rating is not uniform
+```{r}
+kruskal_gross_rating <- kruskal.test(gross ~ rating, data = movies)
+print(kruskal_gross_rating)
+```
+The p-value is very close to zero (<2e-16), this means there is a significant difference in the average gross across different film ratings, so we have to reject the null hypothesis.
+
+```{r}
+library(dunn.test)
+
+dunn_gross_rating <- dunn.test(movies$gross, g = movies$rating, method = "bonferroni")
+print(dunn_gross_rating)
+```
+
+This test gives more information about the comparisons between the difference of gross across all the levels of rating. As we can see: (NC-17 vs. Not Rated) we have p-value = 1, this suggests that the there isn't a significant difference in gross between the two movie rating. The same reasoning applies to the relations between G vs. PG and G vs. PG-13, this means the gross is quite the same.  
+Instead, in all the other correlations the p-value is really low or equal to zero, this suggests that there is a significant difference in gross between the different movie rating.
+
+
+# KRUSKAL TEST BUDGET-RATING
+testing the distribution of variable budget.
+ 
+H0: The distribution of budget by rating is uniform 
+H1: The distribution of budget by rating is not uniform
+ 
+```{r}
+kruskal_budget_rating <- kruskal.test(budget ~ rating, data = movies)
+kruskal_budget_rating
+```
+As we can see the p-value is very close to zero (<2e-16), this means there is a significant difference in the average budget across different film ratings. So we have to reject the null hypothesis, suggesting that at least one film rating has a different average budget compared to the others.
+
+
+```{r}
+library(dunn.test)
+
+dunn_budget_rating <- dunn.test(movies$budget, g = movies$rating, method = "bonferroni")
+print(dunn_budget_rating)
+```
+
+This test gives more information about the comparisons between the difference of budget across all the levels of rating. 
+As we can see: 
+NC-17 vs. Not Rated have p-value = 1, this suggests that the there isn't a significant difference in budget between the two movie rating.  
+Instead, in all the other correlations the p-value is really low or equal to zero, this suggests that there is a significant difference in budget between the different movie rating.
+
+
+# KRUSKAL TEST GROSS-GENRES
+Testing if the gross of a movie depends on its genre.
+ 
+H0: The distribution of gross is the same across all movie genres.
+H1: The distribution of gross is not the same across all movie genres. 
+
+```{r}
+kruskal_gross_genre <- kruskal.test(gross ~ genre, data = movies)
+kruskal_gross_genre
+```
+
+The p-value is very close to 0, this means the distribution of gross by genres is not the same, so we have to reject the null hypothesis.
+
+
+# KRUSKAL TEST BUDGET-GENRES
+ 
+Testing the distribution of budget by movie genres.
+ 
+H0: The distribution of budget is the same across all movie genres. 
+H1: The distribution of budget is not the same across all movie genres.
+ 
+```{r}
+kruskal_budget_genre <- kruskal.test(budget ~ genre, data = movies)
+kruskal_budget_genre
+```
+The p-value is really low, this suggests the budget distribution is not the same for all the movies genres, so we have to reject the null hypothesis.
+
+
+# KRUSKAL TEST GROSS-SCORE 
+Testing if the gross are influenced by the score. 
+HO: There is no difference in the gross revenue for different score levels
+H1: There is difference in the gross revenue for different score levels.
+
+```{r}
+kruskal_gross_score <- kruskal.test(gross ~ score, data = movies)
+kruskal_gross_score
+```
+The p-value tends to zero, this suggests there is difference in the gross revenue for different score levels, so the score of a movie is likely to have an impact on its gross revenue, therefore we reject the null hypothesis.
+
+
+# KRUSKAL TEST GROSS-RELEASE MONTH
+
+Testing the distribution of gross by release month.
+H0: The mean gross revenue is the same across all release month 
+H1: At least one release month has a different gross revenue
+
+```{r}
+kruskal_gross_moth <- kruskal.test(gross ~ month, data = movies)
+kruskal_gross_moth
+```
+
+As we can see the p-value is really low (approaching zero), this indicates that the revenues are not the same across all months. So, we have to reject the null hypothesis.
+
+
+
+# KRUSKALL TEST GENRE-SCORE 
+Testing the relation between genres and score, to see if there is association between these two variables, this would indicate that a specific movie genre generally get a specific score. 
+H0: There is no association between the two variables
+H1: There is a significant association between genres and scores.
+ 
+ 
+```{r}
+kruskal_genre_score <- kruskal.test(score ~ genre, data = movies)
+kruskal_genre_score
+```
+As we can see the p-value is really low, this suggests that there is a significant association between movie genres and scores. It implies that the choice of movie genre does have an impact on the scores, so we reject the null hypothesis.
+
+ 
+# KRUSKAL TEST SCORE-RATING 
+Testing the correlation between the score and rating 
+H0: There is no association or correlation between the score and the rating of movies.
+H1: There is a significant association or correlation between the score and the rating of movie
+ 
+```{r}
+kruskal_score_rating <- kruskal.test(score ~ genre, data =  movies)
+kruskal_score_rating
+```
+As we can see the p-value is really low, this indicates there is association between the score and rating, so a specific movie has generally a specific score, therefore we reject the null hypothesis. 
+
+
+
+
+FEATURE ENGINEERING
+
+
+We can calculate the logarithm of some predictors which may be significant in our analysis.
+
+```{r}
+movies <- movies %>%   
+mutate(log_budget = log(budget + 1))
+movies <- movies %>%   
+mutate(log_votes = log(votes + 1))
+```
+
+Encoding for Categorical Variables:
+
+# Rating
+
+One hot encoding for the rating category
+```{r}
+library(dplyr)
+
+# Convert "rating" to factor 
+movies$rating <- as.factor(movies$rating)
+
+# One-Hot Encoding using model.matrix
+encoded_ratings <- model.matrix(~ rating - 1, data = movies)
+
+# Remove the original 'rating' column
+movies <- movies[ , -which(names(movies) == "rating")]  
+
+# Bind the encoded columns
+movies <- cbind(movies, encoded_ratings) 
+```
+
+```{r}
+movies <- movies %>%
+                 rename(ratingPG_13 = 'ratingPG-13')
+
+movies <- movies %>%
+                 rename(ratingNC_17 = 'ratingNC-17') 
+
+movies <- movies %>%
+                 rename(ratingNot_Rated = 'ratingNot Rated')
+```
+
+# Country
+
+Combinig country into 2 categories: the UK(0) or the USA(1)
+```{r}
+# Create new factors with desired levels
+movies$country_encoded <- factor(
+  movies$country,
+  levels = c("United States", "United Kingdom"), 
+  labels = c(1, 0) 
+)
+
+str(movies$country_encoded)
+```
+
+```{r}
+# Remove the column 'country'
+movies <- movies[ , -which(colnames(movies) == "country")]
+
+```
+
+
+
+# Genre
+
+Combining Genre Categories:
+
+After plotting genre vs. gross box-plot, we realize that genre types can be combined into 3 categories according to their gross distributions, "Animation, Action_Adventure and Others".
+```{r}
+# Create new factors with desired levels
+movies$genre_group <- factor(
+  movies$genre,
+  levels = c("Comedy", "Action", "Drama", "Crime", "Biography", "Adventure", "Horror", "Animation"), 
+  labels = c("Others", "Action_Adventure", "Others",  "Others",  "Others",    "Action_Adventure",    "Others",  "Animation") 
+)
+
+str(movies$genre_group)
+```
+
+
+One-Hot Encoding for the Combined 3-level Genre
+```{r}
+# Remove the column 'genre'
+movies <- movies[ , -which(colnames(movies) == "genre")]
+
+# Convert "genre_group" to factor 
+movies$genre_group <- as.factor(movies$genre_group)
+
+# One-Hot Encoding using model.matrix
+encoded_genre <- model.matrix(~ genre_group - 1, data = movies)
+
+# Remove the original 'genre_group' column
+movies <- movies[ , -which(names(movies) == "genre_group")]  
+
+# Bind the encoded columns
+movies <- cbind(movies, encoded_genre)
+```
+
+```{r}
+movies <- movies %>%
+                 rename(genre_Animation = 'genre_groupAnimation')
+
+movies <- movies %>%
+                 rename(genre_Action_Adventure = 'genre_groupAction_Adventure')
+
+movies <- movies %>%
+                 rename(genre_Others = 'genre_groupOthers')
+```
+
+
+# Month
+
+The bar chart of months vs gross reveals a very clear relation between months that are called dump-months with gross. Therefore, we can categorize months as dump or not dump into 2 levels.
+
+Combinig months into 2 categories: dump month(1) or not(0).
+```{r}
+# Create new factors with desired levels
+movies$month_group <- factor(
+  movies$month,
+  levels = c("January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"), 
+  labels = c(0, 0, 0, 0, 1, 1, 1, 0, 0, 0, 1, 1) 
+)
+
+str(movies$month_group)
+```
+
+
+Check for the missing-values in month_group column
+```{r}
+missing_month_group <- movies[is.na(movies$month_group), ]
+print(missing_month_group)
+```
+
+```{r}
+# Remove the column 'month'
+movies <- movies[ , -which(colnames(movies) == "month")]
+
+```
+
+
+Remove Unnecessary Columns in the Dataframe
+```{r}
+library(dplyr)
+movies <- select(movies, -c('name', 'released', 'company', 'year'))
+```
+
+
+Writers, Stars and Directors present more then 2000 modalities for each variable. That's why we need to find a solution in order to work with them. Regarding stars, we think that the best approach is to categorize them in only two groups: top stars (nb. movies > 10); other (nb movies < 10). That's because, looking at the graph below, we can see that there is not an immediate decrease of number of movies;
+While, for directors/writers, we use a different approach. We categorize them in three groups, based on the average score of their movies.
+
+
+# Stars
+
+Here we have the number of actors for each category:
+```{r}
+library(dplyr)
+
+xx <- movies %>%
+  group_by(star) %>%
+  summarize(movie_count = n()) %>%
+  filter(movie_count > 10) %>%
+  nrow()
+
+yy <- movies %>%
+  group_by(star) %>%
+  summarize(movie_count = n()) %>%
+  filter(movie_count <= 10) %>%
+  nrow()
+
+cat("number of actors who made more than 10 movies:", xx , "\n")
+cat("Number of actors who made 10 or less movies:", yy, "\n")
+```
+
+
+Combining star into 2 categories: Top_Star(1) and Other_Star(0)
+```{r}
+# Create two different categories, Top stars and other
+movies <- movies %>%
+  group_by(star) %>%
+  mutate(movie_count = n()) %>%
+  mutate(star_category = ifelse(movie_count > 10, 1, 0)) %>%
+  ungroup() %>%
+  select(-movie_count)
+```
+
+
+```{r}
+# Remove the column 'star'
+movies <- movies[ , -which(colnames(movies) == "star")]
+```
+
+
+# Directors
+
+We first calculate the number of movies for each director:
+```{r}
+# nb. of movies for directors
+film_per_director <- movies %>%
+  group_by(director) %>%
+  summarize(film_number = n())
+
+head(film_per_director)
+```
+
+
+and now we calculate the average score for each of them:
+```{r}
+mean_directors <- movies %>%
+  group_by(director) %>%
+  summarize(mean_score = mean(score, na.rm = TRUE))
+
+head(mean_directors)
+```
+
+
+Finally, based on the following criteria we assign them to their group:
+```{r}
+library(dplyr)
+
+mean_directors <- mean_directors %>%
+  mutate(director_category = case_when(
+    mean_score > 7 ~ "Best_Director",
+    mean_score >= 6 & mean_score <= 7 ~ "Medium_Director",
+    mean_score < 6 ~ "Worst_Director"
+  ))
+
+# Add the director categories to your main dataset
+movies <- movies %>%
+  left_join(mean_directors, by = "director") 
+
+# Remove unnecessary column 
+movies <- select(movies, -mean_score)
+
+counts_director <- mean_directors %>%
+  count(director_category)
+
+counts_director
+```
+
+
+
+One-Hot Encoding for the Combined 3-level Directors
+```{r}
+# Remove the column 'director'
+movies <- movies[ , -which(colnames(movies) == "director")]
+
+# Convert "director_category" to factor 
+movies$director_category <- as.factor(movies$director_category)
+
+# One-Hot Encoding using model.matrix
+encoded_director <- model.matrix(~ director_category - 1, data = movies)
+
+# Remove the original 'director_category' column
+movies <- movies[ , -which(names(movies) == "director_category")]  
+
+# Bind the encoded columns
+movies <- cbind(movies, encoded_director)
+```
+
+```{r}
+movies <- movies %>%
+                 rename(Worst_Director = 'director_categoryWorst_Director')
+
+movies <- movies %>%
+                 rename(Medium_Director = 'director_categoryMedium_Director')
+
+movies <- movies %>%
+                 rename(Best_Director = 'director_categoryBest_Director')
+```
+
+
+# Writers
+
+We follow the same approach for writers:
+```{r}
+num_writers <- movies %>%
+  group_by(writer) %>%
+  summarize(movies_count = n())
+```
+
+
+```{r}
+mean_writer <- movies %>%
+  group_by(writer) %>%
+  summarize(mean_score = mean(score, na.rm = TRUE))
+
+head(mean_writer)
+```
+
+
+
+Combining writer into 3 categories: best_writer, medium_writer and worst_writer
+```{r}
+mean_writer <- mean_writer %>%
+  mutate(writer_category = case_when(
+    mean_score > 7 ~ "best_writer",
+    mean_score >= 6 & mean_score <= 7 ~ "medium_writer",
+    mean_score < 6 ~ "worst_writer"
+  ))
+
+# Add the writer categories to your main dataset
+movies <- movies %>%
+  left_join(mean_writer, by = "writer") 
+
+# Remove unnecessary column 
+movies <- select(movies, -mean_score)
+
+counts_writer <- mean_writer %>%
+  count(writer_category)
+
+counts_writer
+```
+
+
+One-Hot Encoding for the Combined 3-level Writers
+```{r}
+# Remove the column 'writer'
+movies <- movies[ , -which(colnames(movies) == "writer")]
+
+# Convert "writer_category" to factor 
+movies$writer_category <- as.factor(movies$writer_category)
+
+# One-Hot Encoding using model.matrix
+encoded_writer <- model.matrix(~ writer_category - 1, data = movies)
+
+# Remove the original 'writer_category' column
+movies <- movies[ , -which(names(movies) == "writer_category")]  
+
+# Bind the encoded columns
+movies <- cbind(movies, encoded_writer)
+```
+
+```{r}
+movies <- movies %>%
+                 rename(Worst_Writer = 'writer_categoryworst_writer')
+
+movies <- movies %>%
+                 rename(Medium_Writer = 'writer_categorymedium_writer')
+
+movies <- movies %>%
+                 rename(Best_Writer = 'writer_categorybest_writer')
+```
+
+
+As the last step of data preparation for the model training, we should check the datatype of encoded columns.
+
+Since the encoded columns are mostly numeric but not factor, it's better to convert them to factors. 
+```{r}
+movies$ratingG <- as.factor(movies$ratingG)
+movies$ratingPG <- as.factor(movies$ratingPG)
+movies$ratingPG_13 <- as.factor(movies$ratingPG_13)
+movies$ratingR <- as.factor(movies$ratingR)
+movies$ratingNC_17 <- as.factor(movies$ratingNC_17)
+movies$ratingNot_Rated <- as.factor(movies$ratingNot_Rated)
+movies$genre_Others <- as.factor(movies$genre_Others)
+movies$genre_Action_Adventure <- as.factor(movies$genre_Action_Adventure)
+movies$genre_Animation <- as.factor(movies$genre_Animation)
+movies$star_category <- as.factor(movies$star_category)
+movies$Best_Director <- as.factor(movies$Best_Director)
+movies$Medium_Director <- as.factor(movies$Medium_Director)
+movies$Worst_Director <- as.factor(movies$Worst_Director)
+movies$Best_Writer <- as.factor(movies$Best_Writer)
+movies$Medium_Writer <- as.factor(movies$Medium_Writer)
+movies$Worst_Writer <- as.factor(movies$Worst_Writer)
+```
+
+
+
+FEATURE SCALING
+
+Let's start with Standardization (Z-score normalization)
+
+```{r}
+library(data.table)
+
+features_to_scale <- c("score", "votes", "budget", "runtime", "gross", "log_budget", "log_votes")
+
+movies_scaled <- copy(movies) 
+movies_scaled[features_to_scale] <- scale(movies_scaled[features_to_scale])
+```
+
+
+
+
+
+NON-LINEAR REGRESSION
+
+```{r}
+library(caret)
+library(leaps)  # For forward selection 
+library(olsrr)
+library(MASS)
+```
+
+
+Creating combined features inspiring by the pairwise scatter-plot of numerical variables.
+```{r}
+# Quadratic terms for predictor-target relationships
+movies_scaled["score_sq"] <- movies_scaled["score"]^2
+movies_scaled["budget_sq"] <- movies_scaled["budget"]^2 
+
+# Combined terms 
+movies_scaled["scoresq_votes"] <- movies_scaled["score_sq"] * movies_scaled["votes"]
+movies_scaled["score_votes"] <- movies_scaled["score"] * movies_scaled["votes"]
+movies_scaled["score_budget"] <- movies_scaled["score"] * movies_scaled["budget"]
+movies_scaled["scoresq_budget"] <- movies_scaled["score_sq"] * movies_scaled["budget"]
+```
+
+
+
+
+Since we have so many predictor, it's useful to apply a selection method, preferably the forward selection.
+
+
+Forward Selection
+```{r}
+FitAll <- lm(gross ~ ., data = movies_scaled)
+
+print(summary(FitAll))
+
+# Forward Selection using p-values
+FWDfit.p <- ols_step_forward_p(FitAll, prem=.05)
+
+FWDfit.p
+```
+
+According to results, there are indeed 17 predictors in our dataset that are significant for the regression.
+
+
+Data Splitting & Cross-Validation
+```{r}
+# Split into training and testing sets
+set.seed(123) 
+split_index <- sample(1:nrow(movies_scaled), size = 0.7 * nrow(movies_scaled)) 
+train_data <- movies_scaled[split_index, ]
+test_data <- movies_scaled[-split_index, ]
+
+# Cross-Validation Setup
+ctrl <- trainControl(method = "cv", number = 10)
+```
+
+
+Model training with the most significant features selected by forward selection
+```{r}
+model_poly <- train(gross ~ score + budget + votes + genre_Animation + ratingPG + runtime + Best_Director + ratingPG_13 + log_votes + month_group + score_budget + score_votes + budget_sq + scoresq_budget, data = train_data, method = "lm", trControl = ctrl)
+
+# Inspect model summary for feature significance 
+print(summary(model_poly))
+```
+
+
+
+Prediction on the Test Data
+```{r}
+pred <- predict(model_poly, test_data)
+```
+
+Evaluate Performance
+```{r}
+# R-squared Calculation
+r2 <- summary(model_poly)$r.squared
+
+# Mean Squared Error (MSE)
+mse <- mean((test_data$gross - pred)^2)
+
+# Root Mean Squared Error (RMSE)
+rmse <- sqrt(mse) 
+
+print(paste0("R-squared: ", r2))
+print(paste0("Mean Squared Error: ", mse))
+print(paste0("Root Mean Squared Error: ", rmse))
+
+```
+
+
+
+Let's visualize the order of polynomial regression.
+
+Bias-Variance Trade-off Plot
+```{r}
+# Degrees to Explore
+degrees <- seq(1, 5) 
+
+# Store Results
+results <- data.frame(degree = degrees, 
+                      train_mse = rep(NA, length(degrees)), 
+                      test_mse = rep(NA, length(degrees)))
+
+for (i in seq_along(degrees)) {
+  # Modify your formula based on the current degree 
+  formula <- as.formula(paste("gross ~ score + budget + votes + genre_Animation + ratingPG + ratingPG_13 + runtime + Best_Director + month_group", 
+                              paste0("+ I(budget^", degrees[i], ")"), 
+                              "+ score_votes + score_budget + scoresq_budget")) 
+
+  model <- train(formula, data = train_data, method = "lm", trControl = ctrl)
+
+  poly_pred <- predict(model, test_data) 
+  mse_train <- mean((train_data$gross - predict(model, train_data))^2) # MSE on training data
+  mse_test <- mean((test_data$gross - poly_pred)^2) 
+
+  results$train_mse[i] <- mse_train
+  results$test_mse[i] <- mse_test
+}
+
+# Plotting
+library(ggplot2)
+ggplot(results, aes(x = degree)) +
+  geom_line(aes(y = train_mse), color = "blue") +
+  geom_line(aes(y = test_mse), color = "blue", linetype = "dashed") +
+  labs(x = "Polynomial Degree (Flexibility)", y = "MSE", title = "Bias-Variance Tradeoff")
+```
+
+
+
+
+
+DECISION TREE AND RANDOM FOREST METHODS
+
+```{r}
+library(randomForest)
+```
+
+# Decision Tree
+
+Decision Tree with Hyperparameter Tuning
+```{r}
+# Hyperparameter grid 
+grid <-  expand.grid(cp = seq(0.001, 0.1, by = 0.005)) 
+
+dt_model <- train(gross ~ score + budget + votes + genre_Animation + genre_Others + genre_Action_Adventure + star_category + ratingPG_13 + ratingR + Best_Director + Best_Writer + month_group, data = train_data, method = "rpart", tuneGrid = grid)
+
+print(dt_model$results)  
+print(dt_model$bestTune)
+```
+
+Evaluation for Decision Tree
+```{r}
+# Calculate performance metrics on the best model
+predictions <- predict(dt_model, test_data)
+mse <- mean((test_data$gross - predictions)^2)
+rmse <- sqrt(mse)
+r2 <- cor(test_data$gross, predictions)^2
+```
+
+```{r}
+# Calculate metrics for the decision tree model
+# Print the calculated metrics
+cat("\nDecision Tree Performance:\n")
+cat("R-squared:", r2, "\n")
+cat("MSE:", mse, "\n")
+cat("RMSE:", rmse, "\n") 
+```
+
+Visualizing Tree
+```{r}
+library(rpart)
+dt_model_rpart <- rpart(gross ~ score + budget + votes + genre_Animation + genre_Others + genre_Action_Adventure + star_category + ratingPG_13 + ratingR + Best_Director + Best_Writer + month_group, data = train_data, method = "anova") # Use 'anova' for regression trees
+
+# Visualize the tree
+library(rpart.plot)
+rpart.plot(dt_model_rpart) 
+```
+
+
+
+Feature importance for the decision tree
+```{r}
+library(vip)
+vip(dt_model)
+```
+Obviously, only three features (budget, votes, score) are significant in our tree model.
+
+
+# Random Forest
+
+Random Forest with Hyperparameter Tuning
+```{r}
+grid <- expand.grid(mtry = seq(2, 7, by = 1)) 
+
+rf_model <- train(gross ~ score + budget + votes + genre_Animation + genre_Others + genre_Action_Adventure + star_category + ratingPG_13 + ratingR + Best_Director + Best_Writer + month_group, data = train_data, method = "rf", tuneGrid = grid)
+
+print(rf_model) 
+print(rf_model$bestTune)
+```
+
+Feature Importance (Random Forest)
+```{r}
+importance <- varImp(rf_model, scale = FALSE) 
+plot(importance) 
+```
+
+
+Prediction and Evaluation for Random Forest
+```{r}
+# Calculate performance metrics on the best model
+predictions <- predict(rf_model, test_data)
+mse <- mean((test_data$gross - predictions)^2)
+rmse <- sqrt(mse)
+r2 <- cor(test_data$gross, predictions)^2
+```
+
+```{r}
+# Print the calculated metrics
+cat("\nRandom Forest Performance:\n")
+cat("R-squared:", r2, "\n")
+cat("MSE:", mse, "\n")
+cat("RMSE:", rmse, "\n") 
+```
+
+
+
+
+
+
+
+
+
+
+
+
